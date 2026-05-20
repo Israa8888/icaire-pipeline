@@ -87,15 +87,15 @@ def _upsert(sheet, records: list[dict]) -> tuple[int,int]:
     added = updated = 0
 
     # Build lookup indexes
-    li_idx     = {r.get("LinkedIn URL","").strip(): i
+    li_idx     = {(r.get("LinkedIn URL") or "").strip(): i
                   for i,r in enumerate(all_rows) if r.get("LinkedIn URL")}
-    orcid_idx  = {r.get("ORCID","").strip(): i
+    orcid_idx  = {(r.get("ORCID") or "").strip(): i
                   for i,r in enumerate(all_rows) if r.get("ORCID")}
-    oa_idx     = {r.get("OpenAlex ID","").strip(): i
+    oa_idx     = {(r.get("OpenAlex ID") or "").strip(): i
                   for i,r in enumerate(all_rows) if r.get("OpenAlex ID")}
-    email_idx  = {r.get("Email","").strip(): i
+    email_idx  = {(r.get("Email") or "").strip(): i
                   for i,r in enumerate(all_rows) if r.get("Email")}
-    nameorg_idx= {f"{r.get('Name','').lower()}_{r.get('Organization','').lower()}": i
+    nameorg_idx= {f"{(r.get('Name') or '').lower()}_{(r.get('Organization') or '').lower()}": i
                   for i,r in enumerate(all_rows)}
 
     rows_to_add = []
@@ -125,10 +125,10 @@ def _upsert(sheet, records: list[dict]) -> tuple[int,int]:
 
 def _find_row(record, li_idx, orcid_idx, oa_idx, email_idx, nameorg_idx):
     checks = [
-        (record.get("linkedin_url","").strip(), li_idx),
-        (record.get("orcid","").strip(),        orcid_idx),
-        (record.get("openalex_id","").strip(),  oa_idx),
-        (record.get("email","").strip(),        email_idx),
+        ((record.get("linkedin_url") or "").strip(), li_idx),
+        ((record.get("orcid") or "").strip(),        orcid_idx),
+        ((record.get("openalex_id") or "").strip(),  oa_idx),
+        ((record.get("email") or "").strip(),        email_idx),
     ]
     for val, idx in checks:
         if val and val in idx: return idx[val]
