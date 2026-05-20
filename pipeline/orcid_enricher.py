@@ -10,7 +10,7 @@ Gets: email, email_source, degree, experience_years,
 import requests, logging, time
 from config.settings import ORG_TO_CITY
 
-logger   = logging.getenv = logging.getLogger(__name__)
+logger   = logging.getLogger(__name__)
 BASE     = "https://pub.orcid.org/v3.0"
 HEADERS  = {"Accept":"application/json","User-Agent":"ICAIRE-Pipeline/1.0"}
 
@@ -28,7 +28,7 @@ def enrich_with_orcid(records: list[dict]) -> list[dict]:
 
     for record in records:
         r = dict(record)
-        orcid_id = r.get("orcid","").strip()
+        orcid_id = (r.get("orcid") or "").strip()
 
         # Try to find ORCID if we don't have it
         if not orcid_id and calls < 200:
@@ -59,8 +59,8 @@ def enrich_with_orcid(records: list[dict]) -> list[dict]:
 
 def _search_orcid(record: dict) -> str:
     """Try to find ORCID ID by name + org for records without one."""
-    name = record.get("name","").strip()
-    org  = record.get("organization","").strip()
+    name = (record.get("name") or "").strip()
+    org  = (record.get("organization") or "").strip()
     if not name or not org: return ""
 
     # Only search for known Saudi orgs — avoids false positives
