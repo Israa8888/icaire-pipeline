@@ -141,8 +141,9 @@ def _fetch_profile(orcid_id: str) -> dict:
             if degree and _degree_rank(degree) > _degree_rank(highest_degree):
                 highest_degree = degree
             # Start year for experience calculation
-            start = edu.get("start-date",{})
-            year  = start.get("year",{}).get("value")
+            start = edu.get("start-date") or {}
+            year_obj = start.get("year") or {}
+            year  = year_obj.get("value") if isinstance(year_obj, dict) else None
             if year:
                 try:
                     yr = int(year)
