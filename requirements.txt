@@ -1,0 +1,12 @@
+linkedin-api==2.3.0
+requests
+beautifulsoup4
+semanticscholar
+rapidfuzz
+pandas>=2.2.3
+gspread
+google-auth
+anthropic
+python-dotenv
+lxml
+arxiv

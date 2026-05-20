@@ -1,0 +1,7 @@
+.env
+config/google_credentials.json
+__pycache__/
+*.pyc
+.DS_Store
+output/
+*.log

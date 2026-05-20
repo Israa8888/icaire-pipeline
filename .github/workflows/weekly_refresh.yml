@@ -1,0 +1,49 @@
+name: ICAIRE Pipeline — Weekly Refresh
+
+on:
+  schedule:
+    - cron: '0 8 1 * *'      # Every 1st of the month at 08:00 UTC
+  workflow_dispatch:           # Also allows manual trigger from GitHub UI
+
+jobs:
+  run-pipeline:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Create config directory
+        run: mkdir -p config output
+
+      - name: Write Google credentials from secret
+        run: echo '${{ secrets.GOOGLE_CREDENTIALS_JSON }}' > config/google_credentials.json
+
+      - name: Write .env from secrets
+        run: |
+          echo "LINKEDIN_EMAIL=${{ secrets.LINKEDIN_EMAIL }}"           > .env
+          echo "LINKEDIN_PASSWORD=${{ secrets.LINKEDIN_PASSWORD }}"    >> .env
+          echo "ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}"    >> .env
+          echo "HUNTER_API_KEY=${{ secrets.HUNTER_API_KEY }}"          >> .env
+          echo "GOOGLE_SHEET_ID=${{ secrets.GOOGLE_SHEET_ID }}"        >> .env
+          echo "GOOGLE_SHEETS_CREDENTIALS=config/google_credentials.json" >> .env
+          echo "DRY_RUN=false"                                          >> .env
+
+      - name: Run pipeline
+        run: python main.py
+
+      - name: Upload run log
+        uses: actions/upload-artifact@v4
+        if: always()           # upload log even if pipeline fails
+        with:
+          name: pipeline-log-${{ github.run_number }}
+          path: output/*.log
+          retention-days: 30
