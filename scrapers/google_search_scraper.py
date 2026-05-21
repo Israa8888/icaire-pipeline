@@ -68,7 +68,7 @@ def _run_actor(query: str) -> list[dict]:
             json={
                 "search":             query,
                 "maxItems":           MAX_PROFILES_PER_QUERY,
-                "profileScraperMode": "Fast",
+                "profileScraperMode": "Short",
             },
             timeout=30,
         )
