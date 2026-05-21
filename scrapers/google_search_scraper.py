@@ -1,156 +1,174 @@
 """
-Scraper 3 — Google Custom Search API
-Finds LinkedIn profiles of AI professionals in Saudi Arabia.
-Legal: searches Google's public index, not LinkedIn directly.
-Free tier: 100 queries/day = ~1,000 profiles.
-Claude filters who is ethical AI relevant.
+Scraper 3 — Apify LinkedIn Profile Search
+Actor: harvestapi/linkedin-profile-search
+Searches LinkedIn for Saudi AI professionals.
+Free credits: $5 on signup (~500 profiles).
 """
 
-import requests, logging, time, re
-from config.settings import GOOGLE_CSE_API_KEY, GOOGLE_CSE_CX, GOOGLE_SEARCH_QUERIES
+import requests, logging, time, os
 
 logger = logging.getLogger(__name__)
-BASE   = "https://www.googleapis.com/customsearch/v1"
+
+APIFY_API_KEY = os.getenv("APIFY_API_KEY", "")
+ACTOR_ID      = "harvestapi~linkedin-profile-search"
+BASE_URL      = "https://api.apify.com/v2"
+
+# Search queries targeting Saudi AI/ethical AI professionals
+SEARCH_QUERIES = [
+    {"query": "AI ethics Saudi Arabia",          "location": "Saudi Arabia"},
+    {"query": "responsible AI Riyadh",           "location": "Saudi Arabia"},
+    {"query": "machine learning KAUST",          "location": "Saudi Arabia"},
+    {"query": "artificial intelligence SDAIA",   "location": "Saudi Arabia"},
+    {"query": "data scientist Riyadh",           "location": "Saudi Arabia"},
+    {"query": "NLP Arabic language model",       "location": "Saudi Arabia"},
+    {"query": "computer vision Saudi Arabia",    "location": "Saudi Arabia"},
+    {"query": "AI engineer Riyadh",              "location": "Saudi Arabia"},
+    {"query": "algorithmic fairness Saudi",      "location": "Saudi Arabia"},
+    {"query": "AI governance Saudi Arabia",      "location": "Saudi Arabia"},
+]
+
+MAX_PROFILES_PER_QUERY = 20  # keeps cost low during testing
 
 
 def fetch_google_profiles() -> list[dict]:
-    if not GOOGLE_CSE_API_KEY or not GOOGLE_CSE_CX:
-        logger.warning("Google CSE credentials not set — skipping Google search.")
+    if not APIFY_API_KEY:
+        logger.warning("APIFY_API_KEY not set — skipping LinkedIn search.")
         return []
 
-    all_records, seen_urls = [], set()
-    queries_used = 0
+    all_records = []
+    seen_urls   = set()
 
-    for query in GOOGLE_SEARCH_QUERIES:
-        if queries_used >= 90:   # stay under free tier limit
-            logger.info("Google CSE: approaching daily limit, stopping.")
-            break
+    for search in SEARCH_QUERIES:
+        query    = search["query"]
+        location = search["location"]
+        logger.info(f"Apify LinkedIn: '{query}'...")
 
-        logger.info(f"Google CSE: {query[:70]}...")
+        records = _run_actor(query, location)
+        for r in records:
+            url = r.get("linkedin_url", "")
+            if url and url in seen_urls:
+                continue
+            if url:
+                seen_urls.add(url)
+            all_records.append(r)
 
-        # Paginate — each page = 10 results, max 10 pages per query
-        for start in range(1, 51, 10):
-            if queries_used >= 90: break
-            try:
-                r = requests.get(BASE, timeout=15, params={
-                    "key":   GOOGLE_CSE_API_KEY,
-                    "cx":    GOOGLE_CSE_CX,
-                    "q":     query,
-                    "start": start,
-                    "num":   10,
-                })
-                queries_used += 1
+        time.sleep(2)
 
-                if r.status_code == 429:
-                    logger.warning("Google CSE rate limited — waiting 60s")
-                    time.sleep(60); continue
-
-                r.raise_for_status()
-                items = r.json().get("items", [])
-                if not items: break
-
-                for item in items:
-                    record = _parse_result(item)
-                    if not record: continue
-                    url = record.get("linkedin_url","")
-                    if url and url in seen_urls: continue
-                    if url: seen_urls.add(url)
-                    all_records.append(record)
-
-                time.sleep(1)   # polite delay between pages
-
-            except Exception as e:
-                logger.warning(f"Google CSE error: {e}"); break
-
-        time.sleep(2)   # between queries
-
-    logger.info(f"Google CSE: {len(all_records)} profiles collected "
-                f"({queries_used} queries used).")
+    logger.info(f"Apify LinkedIn: {len(all_records)} profiles collected.")
     return all_records
 
 
-def _parse_result(item: dict) -> dict | None:
-    link    = item.get("link","")
-    title   = item.get("title","")
-    snippet = item.get("snippet","")
+def _run_actor(query: str, location: str) -> list[dict]:
+    """Run the Apify actor and wait for results."""
+    try:
+        # Start the actor run
+        run_resp = requests.post(
+            f"{BASE_URL}/acts/{ACTOR_ID}/runs",
+            headers={"Authorization": f"Bearer {APIFY_API_KEY}"},
+            json={
+                "searchQuery":   query,
+                "location":      location,
+                "maxProfiles":   MAX_PROFILES_PER_QUERY,
+                "scrapeMode":    "fast",  # cheaper — gets name, title, URL, location
+            },
+            timeout=30,
+        )
+        run_resp.raise_for_status()
+        run_id = run_resp.json().get("data", {}).get("id")
+        if not run_id:
+            logger.warning(f"No run ID returned for '{query}'")
+            return []
 
-    # Must be a LinkedIn profile URL
-    if "linkedin.com/in/" not in link: return None
+        # Wait for run to complete
+        logger.info(f"  Run started: {run_id} — waiting...")
+        for _ in range(30):  # wait up to 5 minutes
+            time.sleep(10)
+            status_resp = requests.get(
+                f"{BASE_URL}/actor-runs/{run_id}",
+                headers={"Authorization": f"Bearer {APIFY_API_KEY}"},
+                timeout=15,
+            )
+            status = status_resp.json().get("data", {}).get("status")
+            if status == "SUCCEEDED":
+                break
+            elif status in ["FAILED", "ABORTED", "TIMED-OUT"]:
+                logger.warning(f"  Run failed with status: {status}")
+                return []
 
-    # Clean LinkedIn URL — remove query params
-    linkedin_url = re.sub(r'\?.*$','', link).rstrip('/')
+        # Fetch results from dataset
+        dataset_id = status_resp.json().get("data", {}).get("defaultDatasetId")
+        if not dataset_id:
+            return []
 
-    # Extract name from title (format: "Name - Title | LinkedIn" or "Name | LinkedIn")
-    name = _extract_name(title)
-    if not name: return None
+        results_resp = requests.get(
+            f"{BASE_URL}/datasets/{dataset_id}/items",
+            headers={"Authorization": f"Bearer {APIFY_API_KEY}"},
+            params={"clean": True, "format": "json"},
+            timeout=30,
+        )
+        results_resp.raise_for_status()
+        items = results_resp.json()
 
-    # Extract title/role from snippet or page title
-    role = _extract_role(title, snippet)
+        records = []
+        for item in items:
+            record = _parse_item(item)
+            if record:
+                records.append(record)
 
-    # Extract location signals
-    city = _extract_city(snippet)
+        logger.info(f"  Got {len(records)} profiles")
+        return records
 
-    # Extract org signals
-    org  = _extract_org(snippet + " " + title)
+    except Exception as e:
+        logger.warning(f"Apify actor failed for '{query}': {e}")
+        return []
+
+
+def _parse_item(item: dict) -> dict | None:
+    name = (item.get("name") or item.get("fullName") or "").strip()
+    if not name or len(name) < 4:
+        return None
+
+    linkedin_url = (item.get("linkedinUrl") or item.get("url") or "").strip()
+    title        = (item.get("headline") or item.get("title") or "").strip()
+    location     = (item.get("location") or "").strip()
+    org          = (item.get("currentCompany") or
+                    item.get("company") or "").strip()
 
     return {
         "name":         name,
-        "title":        role,
-        "organization": org,
-        "city":         city,
+        "title":        title[:100] if title else "",
+        "organization": _norm_org(org),
+        "city":         _extract_city(location),
         "country":      "Saudi Arabia",
         "linkedin_url": linkedin_url,
-        "source":       "google_linkedin",
-        # Claude will classify UNESCO domain / ethical AI relevance
+        "source":       "apify_linkedin",
     }
 
 
-def _extract_name(title: str) -> str:
-    # "First Last - Title at Company | LinkedIn"
-    # "First Last | LinkedIn"
-    parts = title.split(" - ")
-    if parts:
-        name = parts[0].replace("| LinkedIn","").strip()
-        # Basic sanity: name should have at least 2 words, no special chars
-        words = name.split()
-        if 2 <= len(words) <= 5 and all(w[0].isalpha() for w in words if w):
-            return name
-    return ""
+def _norm_org(raw: str) -> str:
+    if not raw:
+        return ""
+    m = {
+        "king abdullah university": "KAUST", "kaust": "KAUST",
+        "sdaia": "SDAIA", "kacst": "KACST",
+        "king abdulaziz university": "KAU",
+        "king saud university": "KSU",
+        "kfupm": "KFUPM", "king fahd": "KFUPM",
+        "aramco": "Saudi Aramco", "elm": "Elm", "mozn": "Mozn",
+        "alfaisal": "Alfaisal University",
+        "imam": "Imam University",
+    }
+    low = raw.lower()
+    for k, v in m.items():
+        if k in low:
+            return v
+    return raw
 
 
-def _extract_role(title: str, snippet: str) -> str:
-    # Title format: "Name - ROLE at Company | LinkedIn"
-    if " - " in title and " at " in title:
-        role_part = title.split(" - ")[1].split(" at ")[0].strip()
-        if len(role_part) < 80:
-            return role_part
-    # Fall back to first sentence of snippet
-    first_sentence = snippet.split(".")[0].strip()
-    return first_sentence[:100] if first_sentence else ""
-
-
-def _extract_city(text: str) -> str:
-    from config.settings import CITY_COORDINATES
-    low = text.lower()
-    for city in CITY_COORDINATES:
+def _extract_city(location: str) -> str:
+    cities = ["Riyadh", "Jeddah", "Thuwal", "Dhahran", "Dammam", "Abha", "Medina"]
+    low = location.lower()
+    for city in cities:
         if city.lower() in low:
             return city
-    if "saudi" in low or "ksa" in low:
-        return "Saudi Arabia"
-    return ""
-
-
-def _extract_org(text: str) -> str:
-    from config.settings import TARGET_INSTITUTIONS
-    low = text.lower()
-    org_map = {
-        "kaust":"KAUST","king abdullah university":"KAUST",
-        "sdaia":"SDAIA","kacst":"KACST",
-        "king abdulaziz university":"KAU","king saud university":"KSU",
-        "kfupm":"KFUPM","king fahd university":"KFUPM",
-        "aramco":"Saudi Aramco","elm company":"Elm","mozn":"Mozn",
-        "imam university":"Imam University","alfaisal":"Alfaisal University",
-    }
-    for key, val in org_map.items():
-        if key in low: return val
-    return ""
+    return "Saudi Arabia"
