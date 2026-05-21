@@ -34,6 +34,7 @@ jobs:
           echo "ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}"    >> .env
           echo "HUNTER_API_KEY=${{ secrets.HUNTER_API_KEY }}"          >> .env
           echo "GOOGLE_SHEET_ID=${{ secrets.GOOGLE_SHEET_ID }}"        >> .env
+          echo "APIFY_API_KEY=${{ secrets.APIFY_API_KEY }}" >> .env
           echo "GOOGLE_SHEETS_CREDENTIALS=config/google_credentials.json" >> .env
           echo "DRY_RUN=false"                                          >> .env
 
