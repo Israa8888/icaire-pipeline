@@ -24,28 +24,29 @@ CAT_TO_SUBFIELD = {
 }
 
 # Queries per category — institution in abstract
+# Each query has: (abstract filter, categories, ethical AI skill tag)
 QUERIES = [
     ('abs:"King Abdullah University" OR abs:"KAUST"',
-     ["cs.AI","cs.LG","cs.CL","cs.CV","cs.CY","cs.NE"]),
+     ["cs.AI","cs.LG","cs.CL","cs.CV","cs.CY","cs.NE"], None),
     ('abs:"King Saud University" OR abs:"KSU"',
-     ["cs.AI","cs.LG","cs.CL","cs.CV","cs.CY"]),
+     ["cs.AI","cs.LG","cs.CL","cs.CV","cs.CY"], None),
     ('abs:"King Abdulaziz University" OR abs:"KAU"',
-     ["cs.AI","cs.LG","cs.CL","cs.CV"]),
+     ["cs.AI","cs.LG","cs.CL","cs.CV"], None),
     ('abs:"KFUPM" OR abs:"King Fahd University"',
-     ["cs.AI","cs.LG","cs.CV","cs.CY"]),
+     ["cs.AI","cs.LG","cs.CV","cs.CY"], None),
     ('abs:"SDAIA" OR abs:"Saudi Data and AI"',
-     ["cs.AI","cs.LG","cs.CY","cs.CL"]),
+     ["cs.AI","cs.LG","cs.CY","cs.CL"], "AI governance"),
     ('abs:"KACST"',
-     ["cs.AI","cs.LG","cs.CV"]),
-    # Arabic NLP — high value for Culture domain
+     ["cs.AI","cs.LG","cs.CV"], None),
+    # Arabic NLP — Culture domain
     ('abs:"Arabic NLP" OR abs:"Arabic language model" OR abs:"AraBERT" OR abs:"AraGPT"',
-     ["cs.CL"]),
-    # Ethical AI explicitly
+     ["cs.CL"], "Arabic NLP, Cultural AI"),
+    # Ethical AI explicitly — strongest signal
     ('abs:"AI ethics" OR abs:"algorithmic fairness" OR abs:"responsible AI"',
-     ["cs.CY","cs.AI","cs.LG"]),
+     ["cs.CY","cs.AI","cs.LG"], "AI ethics & governance, Algorithmic fairness"),
     # Saudi Arabia broadly
     ('abs:"Saudi Arabia" AND (abs:"deep learning" OR abs:"machine learning")',
-     ["cs.AI","cs.LG","cs.CV","stat.ML"]),
+     ["cs.AI","cs.LG","cs.CV","stat.ML"], None),
 ]
 
 
@@ -53,7 +54,7 @@ def fetch_arxiv_profiles(max_per_query: int = 75) -> list[dict]:
     all_records, seen = [], set()
     client = arxiv.Client(num_retries=2, delay_seconds=5)
 
-    for i, (abstract_filter, cats) in enumerate(QUERIES):
+    for i, (abstract_filter, cats, query_skill) in enumerate(QUERIES):
         if i > 0: time.sleep(12)
         cat_filter = " OR ".join(f"cat:{c}" for c in cats)
         query      = f"({cat_filter}) AND ({abstract_filter})"
@@ -70,8 +71,9 @@ def fetch_arxiv_profiles(max_per_query: int = 75) -> list[dict]:
 
             for paper in papers:
                 context  = f"{paper.summary} {paper.comment or ''}"
-                if not _has_saudi_signal(context): continue
                 subfield = CAT_TO_SUBFIELD.get(paper.primary_category, "AI")
+                # Use query-level skill tag if available, otherwise use category
+                skill_tag = query_skill if query_skill else subfield
                 org      = _guess_org(context)
 
                 for author in paper.authors:
@@ -86,7 +88,7 @@ def fetch_arxiv_profiles(max_per_query: int = 75) -> list[dict]:
                         "organization":      org,
                         "city":              ORG_TO_CITY.get(org,"Saudi Arabia"),
                         "country":           "Saudi Arabia",
-                        "ethical_ai_skills": subfield,
+                        "ethical_ai_skills": skill_tag,
                         "sector":            "academia",
                         "source":            "arxiv",
                     })
