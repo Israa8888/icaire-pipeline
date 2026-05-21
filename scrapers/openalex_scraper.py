@@ -46,9 +46,19 @@ def fetch_openalex_profiles() -> list[dict]:
 
     logger.info(f"  Phase 1 done: {len(raw_authors)} unique Saudi AI authors found")
 
-    # Phase 2: batch enrich — get publication counts and ORCID
-    # Use OpenAlex author endpoint with filter, not one call per person
+    # Phase 2: batch enrich
     enriched = _batch_enrich(list(raw_authors.values()))
+
+    # Phase 3: filter — keep only people with 3+ papers OR explicit AI title
+    before = len(enriched)
+    enriched = [
+        r for r in enriched
+        if (int(r.get("publications") or 0) >= 3)
+        or any(kw in (r.get("title") or "").lower()
+               for kw in ["ai","machine learning","data scientist",
+                           "professor","researcher","engineer"])
+    ]
+    logger.info(f"  Filter: {before} → {len(enriched)} (removed {before-len(enriched)} 1-paper co-authors)")
 
     logger.info(f"OpenAlex: {len(enriched)} profiles collected.")
     return enriched
