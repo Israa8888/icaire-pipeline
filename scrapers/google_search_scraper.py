@@ -107,6 +107,8 @@ def _run_actor(query: str) -> list[dict]:
         )
         results_resp.raise_for_status()
         items = results_resp.json()
+        if items:
+            logger.info(f"  Sample item keys: {list(items[0].keys()) if items else 'empty'}")
 
         records = []
         for item in items:
@@ -123,19 +125,57 @@ def _run_actor(query: str) -> list[dict]:
 
 
 def _parse_item(item: dict) -> dict | None:
-    name = (item.get("name") or item.get("fullName") or "").strip()
+    if not isinstance(item, dict):
+        return None
+
+    # Apify HarvestAPI returns nested structure — handle both flat and nested
+    # Try common field names used by this actor
+    name = (
+        item.get("name") or
+        item.get("fullName") or
+        item.get("firstName","") + " " + item.get("lastName","")
+    ).strip()
+
     if not name or len(name) < 4:
         return None
 
-    linkedin_url = (item.get("linkedinUrl") or item.get("url") or "").strip()
-    title        = (item.get("headline") or item.get("title") or "").strip()
-    location     = (item.get("location") or "").strip()
-    org          = (item.get("currentCompany") or
-                    item.get("company") or "").strip()
+    linkedin_url = (
+        item.get("linkedinUrl") or
+        item.get("profileUrl") or
+        item.get("url") or
+        item.get("linkedin_url") or ""
+    ).strip()
+
+    title = (
+        item.get("headline") or
+        item.get("title") or
+        item.get("currentPosition") or ""
+    )
+    if isinstance(title, dict):
+        title = title.get("title", "")
+    title = str(title).strip()[:100]
+
+    location = str(item.get("location") or item.get("city") or "").strip()
+
+    # Current company
+    org = ""
+    company = item.get("currentCompany") or item.get("company") or ""
+    if isinstance(company, dict):
+        org = company.get("name", "")
+    elif isinstance(company, str):
+        org = company
+
+    # Try positions array
+    if not org:
+        positions = item.get("positions") or item.get("experience") or []
+        if positions and isinstance(positions, list) and len(positions) > 0:
+            pos = positions[0]
+            if isinstance(pos, dict):
+                org = pos.get("companyName") or pos.get("company","")
 
     return {
         "name":         name,
-        "title":        title[:100] if title else "",
+        "title":        title,
         "organization": _norm_org(org),
         "city":         _extract_city(location),
         "country":      "Saudi Arabia",
