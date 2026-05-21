@@ -10,24 +10,24 @@ import requests, logging, time, os
 logger = logging.getLogger(__name__)
 
 APIFY_API_KEY = os.getenv("APIFY_API_KEY", "")
-ACTOR_ID      = "harvestapi/linkedin-profile-search"
+ACTOR_ID      = "harvestapi/linkedin-profile-search-by-services"
 BASE_URL      = "https://api.apify.com/v2"
 
 # Search queries targeting Saudi AI/ethical AI professionals
 SEARCH_QUERIES = [
-    {"query": "AI ethics Saudi Arabia",          "location": "Saudi Arabia"},
-    {"query": "responsible AI Riyadh",           "location": "Saudi Arabia"},
-    {"query": "machine learning KAUST",          "location": "Saudi Arabia"},
-    {"query": "artificial intelligence SDAIA",   "location": "Saudi Arabia"},
-    {"query": "data scientist Riyadh",           "location": "Saudi Arabia"},
-    {"query": "NLP Arabic language model",       "location": "Saudi Arabia"},
-    {"query": "computer vision Saudi Arabia",    "location": "Saudi Arabia"},
-    {"query": "AI engineer Riyadh",              "location": "Saudi Arabia"},
-    {"query": "algorithmic fairness Saudi",      "location": "Saudi Arabia"},
-    {"query": "AI governance Saudi Arabia",      "location": "Saudi Arabia"},
+    "AI ethics Saudi Arabia",
+    "responsible AI Riyadh",
+    "machine learning engineer Saudi Arabia",
+    "artificial intelligence SDAIA Riyadh",
+    "data scientist Saudi Arabia",
+    "NLP Arabic language model Saudi",
+    "computer vision engineer Saudi Arabia",
+    "AI engineer Riyadh Saudi",
+    "algorithmic fairness researcher Saudi",
+    "AI governance Saudi Arabia",
 ]
 
-MAX_PROFILES_PER_QUERY = 20  # keeps cost low during testing
+MAX_PROFILES_PER_QUERY = 20
 
 
 def fetch_google_profiles() -> list[dict]:
@@ -38,12 +38,9 @@ def fetch_google_profiles() -> list[dict]:
     all_records = []
     seen_urls   = set()
 
-    for search in SEARCH_QUERIES:
-        query    = search["query"]
-        location = search["location"]
+    for query in SEARCH_QUERIES:
         logger.info(f"Apify LinkedIn: '{query}'...")
-
-        records = _run_actor(query, location)
+        records = _run_actor(query)
         for r in records:
             url = r.get("linkedin_url", "")
             if url and url in seen_urls:
@@ -58,7 +55,7 @@ def fetch_google_profiles() -> list[dict]:
     return all_records
 
 
-def _run_actor(query: str, location: str) -> list[dict]:
+def _run_actor(query: str) -> list[dict]:
     """Run the Apify actor and wait for results."""
     try:
         # Start the actor run
@@ -69,10 +66,9 @@ def _run_actor(query: str, location: str) -> list[dict]:
                 "Content-Type":  "application/json",
             },
             json={
-                "searchQuery":          query,
-                "locationsFilter":      [location],
-                "maxProfilesToScrape":  MAX_PROFILES_PER_QUERY,
-                "scrapeMode":           "fast",
+                "search":             query,
+                "maxItems":           MAX_PROFILES_PER_QUERY,
+                "profileScraperMode": "Fast",
             },
             timeout=30,
         )
