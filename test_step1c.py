@@ -17,8 +17,8 @@ def run():
     print(f"{BOLD}{CYAN}  STEP 1C — Google CSE / LinkedIn scraper test{RESET}")
     print(f"{BOLD}{CYAN}{'='*60}{RESET}\n")
 
-    from config.settings import GOOGLE_CSE_API_KEY, GOOGLE_CSE_CX
-    if not GOOGLE_CSE_API_KEY or not GOOGLE_CSE_CX:
+    APIFY_API_KEY = os.getenv("APIFY_API_KEY", "")
+    if not APIFY_API_KEY:
         print(f"{RED}  ✗ Google CSE credentials not set in .env{RESET}")
         print(f"  Add GOOGLE_CSE_API_KEY and GOOGLE_CSE_CX to your .env file")
         sys.exit(1)
