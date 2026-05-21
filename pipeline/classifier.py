@@ -23,7 +23,7 @@ from config.settings import ANTHROPIC_API_KEY
 
 logger = logging.getLogger(__name__)
 client = Anthropic(api_key=ANTHROPIC_API_KEY)
-BATCH_SIZE = 8
+BATCH_SIZE = 3   # smaller batches = shorter JSON = no truncation
 
 SYSTEM_PROMPT = """You are a research analyst for ICAIRE, an ethical AI research institute in Riyadh.
 Your job is to classify AI professionals in Saudi Arabia for a connection list focused on ETHICAL AI.
@@ -152,7 +152,7 @@ def _classify_batch(batch: list[dict]) -> list[dict]:
     try:
         response = client.messages.create(
             model="claude-sonnet-4-5",
-            max_tokens=1000,
+            max_tokens=4096,
             system=SYSTEM_PROMPT,
             messages=[{"role":"user","content":
                 f"Classify these {len(batch)} professionals:\n\n{profiles}"}],
