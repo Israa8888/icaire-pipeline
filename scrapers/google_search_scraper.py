@@ -10,7 +10,7 @@ import requests, logging, time, os
 logger = logging.getLogger(__name__)
 
 APIFY_API_KEY = os.getenv("APIFY_API_KEY", "")
-ACTOR_ID      = "harvestapi/linkedin-profile-search-by-services"
+ACTOR_ID      = "qXMa8kADnUQdmz18G"
 BASE_URL      = "https://api.apify.com/v2"
 
 # Search queries targeting Saudi AI/ethical AI professionals
