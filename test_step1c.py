@@ -1,5 +1,5 @@
 """
-TEST — Step 1C: Google Custom Search (LinkedIn profiles)
+TEST — Step 1C: Apify LinkedIn scraper
 Run after Step 1B passes.
 Covers industry + government people not in academic databases.
 
@@ -9,29 +9,32 @@ Usage: python test_step1c.py
 import sys, os, json
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from dotenv import load_dotenv
+load_dotenv()
+
 GREEN = "\033[92m"; RED = "\033[91m"; YELLOW = "\033[93m"
 CYAN  = "\033[96m"; BOLD = "\033[1m";  RESET = "\033[0m"
 
 def run():
     print(f"\n{BOLD}{CYAN}{'='*60}{RESET}")
-    print(f"{BOLD}{CYAN}  STEP 1C — Google CSE / LinkedIn scraper test{RESET}")
+    print(f"{BOLD}{CYAN}  STEP 1C — Apify LinkedIn scraper test{RESET}")
     print(f"{BOLD}{CYAN}{'='*60}{RESET}\n")
 
     APIFY_API_KEY = os.getenv("APIFY_API_KEY", "")
     if not APIFY_API_KEY:
-        print(f"{RED}  ✗ Google CSE credentials not set in .env{RESET}")
-        print(f"  Add GOOGLE_CSE_API_KEY and GOOGLE_CSE_CX to your .env file")
+        print(f"{RED}  ✗ APIFY_API_KEY not set in .env{RESET}")
+        print(f"  Add APIFY_API_KEY to your .env file")
         sys.exit(1)
 
-    print(f"  {GREEN}✓ Google CSE credentials found{RESET}")
-    print(f"  Searching LinkedIn for Saudi AI professionals...")
-    print(f"  This takes ~3-5 minutes.\n")
+    print(f"  {GREEN}✓ Apify API key found{RESET}")
+    print(f"  Searching LinkedIn for Saudi AI professionals via Apify...")
+    print(f"  This takes ~5-10 minutes (actor runs in Apify cloud).\n")
 
     from scrapers.google_search_scraper import fetch_google_profiles
     records = fetch_google_profiles()
 
     if not records:
-        print(f"{RED}  ✗ No records. Check credentials and CSE setup.{RESET}")
+        print(f"{RED}  ✗ No records. Check Apify actor and credentials.{RESET}")
         return
 
     print(f"\n{BOLD}  Total collected: {len(records)}{RESET}")
@@ -48,7 +51,7 @@ def run():
     print(f"\n{BOLD}  Field coverage:{RESET}")
     for f in ["name","title","organization","linkedin_url","city"]:
         filled = sum(1 for r in records if r.get(f))
-        pct    = int(filled / len(records) * 100)
+        pct    = int(filled / len(records) * 100) if records else 0
         bar    = "█"*(pct//10) + "░"*(10-pct//10)
         print(f"    {f:<25} {bar} {pct}%")
 
