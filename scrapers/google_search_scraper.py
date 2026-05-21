@@ -109,6 +109,11 @@ def _run_actor(query: str) -> list[dict]:
         items = results_resp.json()
         if items:
             logger.info(f"  Sample item keys: {list(items[0].keys()) if items else 'empty'}")
+            # Save first raw item for debugging
+            import json as _json
+            with open("output/debug_apify_raw.json", "w") as _f:
+                _json.dump(items[:2], _f, indent=2)
+            logger.info(f"  Raw sample saved to output/debug_apify_raw.json")
 
         records = []
         for item in items:
