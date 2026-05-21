@@ -89,6 +89,13 @@ def run():
     email_count = sum(1 for r in enriched if r.get("email"))
     logger.info(f"  {email_count} records now have email")
 
+    # ── STEP 4B: LinkedIn enrichment (title, LinkedIn URL, degree) ─
+    logger.info("STEP 4B — LinkedIn enrichment via Apify...")
+    from scrapers.linkedin_enricher import enrich_with_linkedin
+    enriched = enrich_with_linkedin(enriched, max_enriched=300)
+    li_count = sum(1 for r in enriched if r.get("linkedin_url"))
+    logger.info(f"  {li_count} records now have LinkedIn URL")
+
     # ── STEP 5: Claude API classification ────────────────────────
     logger.info("STEP 5 — Classifying with Claude API (UNESCO + ethical AI)...")
     from pipeline.classifier import classify
