@@ -96,7 +96,7 @@ def run():
     # li_count = sum(1 for r in enriched if r.get("linkedin_url"))
     # logger.info(f"  {li_count} records now have LinkedIn URL")
     # ── STEP 4B: LinkedIn enrichment — disabled (requires paid Apify plan)
-    logger.info("STEP 4B — LinkedIn enrichment skipped."
+    logger.info("STEP 4B — LinkedIn enrichment skipped.")
 
 
     # ── STEP 5: Claude API classification ────────────────────────
