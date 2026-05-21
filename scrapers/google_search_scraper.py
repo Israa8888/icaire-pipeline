@@ -102,7 +102,7 @@ def _run_actor(query: str) -> list[dict]:
         results_resp = requests.get(
             f"{BASE_URL}/datasets/{dataset_id}/items",
             headers={"Authorization": f"Bearer {APIFY_API_KEY}"},
-            params={"clean": True, "format": "json"},
+            params={"clean": "true", "format": "json"},
             timeout=30,
         )
         results_resp.raise_for_status()
