@@ -1,7 +1,7 @@
 """
-Scraper 1A — OpenAlex WORKS API
-Searches AI/ethical AI papers where at least one author is Saudi-affiliated.
-Guarantees every person collected has published AI-related work.
+Scraper 1A — OpenAlex WORKS API (fast version)
+Step 1: Collect all Saudi authors from AI papers (no extra API calls)
+Step 2: Batch-enrich author profiles in one pass at the end
 """
 
 import requests, logging, time
@@ -11,74 +11,51 @@ logger  = logging.getLogger(__name__)
 BASE    = "https://api.openalex.org"
 HEADERS = {"User-Agent": "ICAIRE-Pipeline/1.0 (mailto:info@icaire.org)"}
 
-# Search papers by topic — these are OpenAlex topic IDs confirmed for AI/ethics
 AI_PAPER_SEARCHES = [
-    # Ethical AI explicitly
-    {"topic": "AI ethics",                "query": "artificial intelligence ethics"},
-    {"topic": "Algorithmic fairness",     "query": "algorithmic fairness bias"},
-    {"topic": "Responsible AI",           "query": "responsible AI governance"},
-    {"topic": "Explainable AI",           "query": "explainable artificial intelligence XAI"},
-    {"topic": "AI policy",                "query": "AI policy regulation"},
-    # Core AI subfields relevant to ethical AI
-    {"topic": "NLP / Arabic NLP",         "query": "natural language processing Arabic"},
-    {"topic": "Machine Learning",         "query": "machine learning deep learning"},
-    {"topic": "Computer Vision",          "query": "computer vision image recognition"},
-    {"topic": "AI Safety",               "query": "AI safety alignment"},
-    {"topic": "Privacy / Data protection","query": "privacy preserving machine learning"},
-    # Applied ethical AI
-    {"topic": "AI in healthcare",         "query": "artificial intelligence healthcare medical"},
-    {"topic": "AI in education",          "query": "artificial intelligence education learning"},
-    {"topic": "AI & misinformation",      "query": "AI disinformation detection fake news"},
-    {"topic": "Arabic language AI",       "query": "Arabic language model NLP AraBERT"},
+    {"topic": "AI ethics & governance",    "query": "artificial intelligence ethics governance"},
+    {"topic": "Algorithmic fairness",      "query": "algorithmic fairness bias machine learning"},
+    {"topic": "Responsible AI",            "query": "responsible AI trustworthy"},
+    {"topic": "Explainable AI",            "query": "explainable artificial intelligence XAI"},
+    {"topic": "Arabic NLP",                "query": "Arabic natural language processing NLP"},
+    {"topic": "Machine Learning",          "query": "machine learning deep learning Saudi"},
+    {"topic": "Computer Vision",           "query": "computer vision image recognition Saudi"},
+    {"topic": "AI Safety",                 "query": "AI safety alignment"},
+    {"topic": "Privacy preserving AI",     "query": "privacy preserving federated learning"},
+    {"topic": "AI in healthcare",          "query": "artificial intelligence healthcare medical Saudi"},
+    {"topic": "AI in education",           "query": "artificial intelligence education learning Saudi"},
+    {"topic": "AI & misinformation",       "query": "AI disinformation fake news detection"},
 ]
 
-SAUDI_ORG_SIGNALS = [
-    "saudi", "kaust", "kacst", "sdaia",
-    "king abdullah", "king abdulaziz", "king saud",
-    "king fahd", "kfupm", "imam", "alfaisal",
-    "princess nourah", "aramco", "riyadh", "jeddah",
-    "thuwal", "dhahran", "elm company", "mozn",
+SAUDI_SIGNALS = [
+    "saudi","kaust","kacst","sdaia","king abdullah","king abdulaziz",
+    "king saud","king fahd","kfupm","imam","alfaisal",
+    "princess nourah","aramco","riyadh","jeddah","thuwal","dhahran",
 ]
 
 
 def fetch_openalex_profiles() -> list[dict]:
-    all_records = []
-    seen_ids    = set()
+    # Phase 1: collect author IDs and basic info from papers
+    raw_authors = {}  # openalex_id → basic record
 
     for search in AI_PAPER_SEARCHES:
-        topic   = search["topic"]
-        query   = search["query"]
-        logger.info(f"OpenAlex WORKS: '{topic}'...")
+        topic = search["topic"]
+        query = search["query"]
+        logger.info(f"OpenAlex: '{topic}'...")
+        _collect_from_papers(query, topic, raw_authors)
+        time.sleep(0.5)
 
-        authors = _fetch_authors_from_papers(query, topic)
-        for r in authors:
-            uid = r.get("openalex_id", "")
-            if uid and uid not in seen_ids:
-                seen_ids.add(uid)
-                all_records.append(r)
-            elif not uid:
-                # No OpenAlex ID — use name+org as key
-                key = f"{r.get('name','').lower()}_{r.get('organization','').lower()}"
-                if key not in seen_ids:
-                    seen_ids.add(key)
-                    all_records.append(r)
+    logger.info(f"  Phase 1 done: {len(raw_authors)} unique Saudi AI authors found")
 
-        time.sleep(1)
+    # Phase 2: batch enrich — get publication counts and ORCID
+    # Use OpenAlex author endpoint with filter, not one call per person
+    enriched = _batch_enrich(list(raw_authors.values()))
 
-    logger.info(f"OpenAlex: {len(all_records)} AI-relevant profiles collected.")
-    return all_records
+    logger.info(f"OpenAlex: {len(enriched)} profiles collected.")
+    return enriched
 
 
-def _fetch_authors_from_papers(query: str, topic: str) -> list[dict]:
-    """
-    Search papers by query, filter for Saudi-authored ones,
-    extract and enrich each author.
-    """
-    authors_found = []
-    seen_author_ids = set()
-
+def _collect_from_papers(query: str, topic: str, raw_authors: dict) -> None:
     try:
-        # Search works (papers) matching the query
         resp = requests.get(
             f"{BASE}/works",
             headers=HEADERS,
@@ -88,57 +65,53 @@ def _fetch_authors_from_papers(query: str, topic: str) -> list[dict]:
                 "filter":   "authorships.institutions.country_code:SA",
                 "per-page": 50,
                 "sort":     "cited_by_count:desc",
-                "select":   "id,title,authorships,publication_year,type,primary_location,cited_by_count",
+                "select":   "id,title,authorships,type,primary_location",
             }
         )
         resp.raise_for_status()
         works = resp.json().get("results", [])
-        logger.info(f"  Found {len(works)} papers")
+        logger.info(f"  {len(works)} papers found")
 
         for work in works:
-            pub_type  = work.get("type", "")
-            journal   = ((work.get("primary_location") or {})
-                         .get("source") or {}).get("display_name", "")
-            pub_year  = work.get("publication_year", "")
-            title     = work.get("title", "")
+            pub_type = work.get("type", "")
+            journal  = ((work.get("primary_location") or {})
+                        .get("source") or {}).get("display_name", "")
+            title    = work.get("title", "")
 
             for authorship in work.get("authorships", []):
-                author = authorship.get("author", {})
-                author_id = (author.get("id") or "").replace("https://openalex.org/", "")
-
-                # Only include Saudi-affiliated authors
                 institutions = authorship.get("institutions", [])
-                if not _is_saudi_affiliated(institutions):
+                if not _is_saudi(institutions):
                     continue
 
-                if author_id and author_id in seen_author_ids:
-                    continue
-                if author_id:
-                    seen_author_ids.add(author_id)
-
-                name = author.get("display_name", "").strip()
-                if not name:
+                author    = authorship.get("author", {})
+                author_id = (author.get("id") or "").replace("https://openalex.org/", "")
+                name      = (author.get("display_name") or "").strip()
+                if not name or not author_id:
                     continue
 
-                # Get institution details
-                inst     = institutions[0] if institutions else {}
-                raw_org  = inst.get("display_name", "")
-                org      = _norm_org(raw_org)
-                city     = ORG_TO_CITY.get(org, _inst_city(inst))
+                if author_id in raw_authors:
+                    # Already seen — just add more topic tags
+                    existing = raw_authors[author_id]
+                    existing_skills = existing.get("ethical_ai_skills", "")
+                    if topic not in existing_skills:
+                        existing["ethical_ai_skills"] = f"{existing_skills}, {topic}".strip(", ")
+                    continue
 
-                # Fetch full author profile for publications/citations
-                full_profile = _fetch_author_profile(author_id) if author_id else {}
+                inst    = institutions[0] if institutions else {}
+                raw_org = inst.get("display_name", "")
+                org     = _norm_org(raw_org)
+                city    = ORG_TO_CITY.get(org, _inst_city(inst))
 
-                record = {
+                raw_authors[author_id] = {
                     "name":               name,
                     "title":              "Researcher",
                     "organization":       org,
                     "city":               city,
                     "country":            "Saudi Arabia",
                     "openalex_id":        author_id,
-                    "orcid":              full_profile.get("orcid", ""),
-                    "publications":       full_profile.get("publications", ""),
-                    "citations":          full_profile.get("citations", ""),
+                    "orcid":              "",
+                    "publications":       "",
+                    "citations":          "",
                     "publication_types":  pub_type,
                     "top_journals":       journal,
                     "recent_paper_title": title,
@@ -146,73 +119,74 @@ def _fetch_authors_from_papers(query: str, topic: str) -> list[dict]:
                     "sector":             _guess_sector(org),
                     "source":             "openalex",
                 }
-                authors_found.append(record)
 
     except Exception as e:
-        logger.warning(f"OpenAlex works search failed for '{query}': {e}")
-
-    return authors_found
+        logger.warning(f"OpenAlex paper search failed for '{query}': {e}")
 
 
-def _fetch_author_profile(author_id: str) -> dict:
-    """Fetch full author profile for publications and citations count."""
-    if not author_id:
-        return {}
-    try:
-        resp = requests.get(
-            f"{BASE}/authors/{author_id}",
-            headers=HEADERS,
-            timeout=15,
-        )
-        resp.raise_for_status()
-        data = resp.json()
+def _batch_enrich(records: list[dict]) -> list[dict]:
+    """
+    Enrich author profiles in batches of 50 using OpenAlex filter API.
+    One API call per 50 authors instead of one per author.
+    """
+    if not records:
+        return records
 
-        # Get top journals from recent works
-        works_resp = requests.get(
-            f"{BASE}/works",
-            headers=HEADERS,
-            timeout=15,
-            params={
-                "filter":   f"author.id:{author_id}",
-                "per-page": 5,
-                "sort":     "publication_date:desc",
-                "select":   "title,primary_location,type",
-            }
-        )
-        journals = []
-        recent_title = ""
-        if works_resp.ok:
-            works = works_resp.json().get("results", [])
-            if works:
-                recent_title = works[0].get("title", "")
-            journals = list({
-                ((w.get("primary_location") or {}).get("source") or {}).get("display_name", "")
-                for w in works
-                if ((w.get("primary_location") or {}).get("source") or {}).get("display_name")
-            })
+    logger.info(f"  Phase 2: enriching {len(records)} authors in batches...")
+    enriched_map = {}
 
-        orcid = (data.get("ids") or {}).get("orcid", "")
-        if orcid:
-            orcid = orcid.replace("https://orcid.org/", "")
+    # Split into batches of 50
+    ids = [r["openalex_id"] for r in records if r.get("openalex_id")]
+    batches = [ids[i:i+50] for i in range(0, len(ids), 50)]
 
-        return {
-            "orcid":              orcid,
-            "publications":       data.get("works_count", 0) or 0,
-            "citations":          data.get("cited_by_count", 0) or 0,
-            "top_journals":       ", ".join(j for j in journals[:3] if j),
-            "recent_paper_title": recent_title,
-        }
-    except Exception:
-        return {}
+    for i, batch in enumerate(batches):
+        logger.info(f"  Enrichment batch {i+1}/{len(batches)}...")
+        try:
+            filter_str = "|".join(batch)
+            resp = requests.get(
+                f"{BASE}/authors",
+                headers=HEADERS,
+                timeout=20,
+                params={
+                    "filter":   f"ids.openalex:{filter_str}",
+                    "per-page": 50,
+                    "select":   "id,works_count,cited_by_count,ids",
+                }
+            )
+            resp.raise_for_status()
+            authors = resp.json().get("results", [])
+
+            for a in authors:
+                aid   = (a.get("id") or "").replace("https://openalex.org/", "")
+                orcid = (a.get("ids") or {}).get("orcid", "")
+                if orcid:
+                    orcid = orcid.replace("https://orcid.org/", "")
+                enriched_map[aid] = {
+                    "orcid":        orcid,
+                    "publications": a.get("works_count", 0) or 0,
+                    "citations":    a.get("cited_by_count", 0) or 0,
+                }
+
+        except Exception as e:
+            logger.warning(f"  Batch enrichment failed: {e}")
+
+        time.sleep(0.5)
+
+    # Merge enrichment back into records
+    for r in records:
+        aid = r.get("openalex_id", "")
+        if aid in enriched_map:
+            r.update(enriched_map[aid])
+
+    return records
 
 
-def _is_saudi_affiliated(institutions: list) -> bool:
+def _is_saudi(institutions: list) -> bool:
     for inst in institutions:
-        country = inst.get("country_code", "")
-        if country == "SA":
+        if inst.get("country_code") == "SA":
             return True
-        name = inst.get("display_name", "").lower()
-        if any(sig in name for sig in SAUDI_ORG_SIGNALS):
+        name = (inst.get("display_name") or "").lower()
+        if any(s in name for s in SAUDI_SIGNALS):
             return True
     return False
 
@@ -242,18 +216,14 @@ def _norm_org(raw: str) -> str:
 
 
 def _inst_city(inst: dict) -> str:
-    """Extract city from OpenAlex institution data."""
     geo = inst.get("geo") or {}
-    city = geo.get("city", "")
-    if city:
-        return city
-    return ORG_TO_CITY.get(_norm_org(inst.get("display_name", "")), "Saudi Arabia")
+    return geo.get("city", "Saudi Arabia")
 
 
 def _guess_sector(org: str) -> str:
-    academic = ["KAUST", "KAU", "KSU", "KFUPM", "KACST",
-                "Imam University", "Princess Nourah University", "Alfaisal University"]
+    academia   = ["KAUST","KAU","KSU","KFUPM","KACST",
+                  "Imam University","Princess Nourah University","Alfaisal University"]
     government = ["SDAIA"]
-    if org in academic:    return "academia"
+    if org in academia:    return "academia"
     if org in government:  return "government"
     return "industry"
