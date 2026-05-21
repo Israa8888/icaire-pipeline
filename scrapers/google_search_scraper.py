@@ -1,45 +1,46 @@
 """
-Scraper 3 — Apify LinkedIn Profile Search
+Scraper 3 — Apify LinkedIn Profile Search (discovery)
+Finds industry + government Saudi AI professionals not in academic databases.
 Actor: harvestapi/linkedin-profile-search
-Searches LinkedIn for Saudi AI professionals.
-Free credits: $5 on signup (~500 profiles).
+Actor ID: M2FMdjRVeF1HPGFcc
+
+Cost: ~$0.004 per profile (Full mode)
+Free credits: $5 on signup
 """
 
 import requests, logging, time, os
 
-logger = logging.getLogger(__name__)
+logger    = logging.getLogger(__name__)
+APIFY_KEY = os.getenv("APIFY_API_KEY", "")
+BASE_URL  = "https://api.apify.com/v2"
+ACTOR_ID  = "M2FMdjRVeF1HPGFcc"
 
-APIFY_API_KEY = os.getenv("APIFY_API_KEY", "")
-ACTOR_ID      = "qXMa8kADnUQdmz18G"
-BASE_URL      = "https://api.apify.com/v2"
-
-# Search queries targeting Saudi AI/ethical AI professionals
+# Targeted queries for Saudi AI professionals in industry/government
 SEARCH_QUERIES = [
     "AI ethics Saudi Arabia",
     "responsible AI Riyadh",
     "machine learning engineer Saudi Arabia",
-    "artificial intelligence SDAIA Riyadh",
+    "artificial intelligence SDAIA",
     "data scientist Saudi Arabia",
-    "NLP Arabic language model Saudi",
-    "computer vision engineer Saudi Arabia",
-    "AI engineer Riyadh Saudi",
-    "algorithmic fairness researcher Saudi",
+    "NLP Arabic Saudi Arabia",
+    "computer vision Saudi Arabia",
+    "AI engineer Riyadh",
+    "deep learning Saudi Arabia",
     "AI governance Saudi Arabia",
 ]
 
-MAX_PROFILES_PER_QUERY = 20
+MAX_PER_QUERY = 10  # keeps cost ~$0.40 per query
 
 
 def fetch_google_profiles() -> list[dict]:
-    if not APIFY_API_KEY:
-        logger.warning("APIFY_API_KEY not set — skipping LinkedIn search.")
+    if not APIFY_KEY:
+        logger.warning("APIFY_API_KEY not set — skipping LinkedIn discovery.")
         return []
 
-    all_records = []
-    seen_urls   = set()
+    all_records, seen_urls = [], set()
 
     for query in SEARCH_QUERIES:
-        logger.info(f"Apify LinkedIn: '{query}'...")
+        logger.info(f"Apify LinkedIn discovery: '{query}'...")
         records = _run_actor(query)
         for r in records:
             url = r.get("linkedin_url", "")
@@ -48,7 +49,6 @@ def fetch_google_profiles() -> list[dict]:
             if url:
                 seen_urls.add(url)
             all_records.append(r)
-
         time.sleep(2)
 
     logger.info(f"Apify LinkedIn: {len(all_records)} profiles collected.")
@@ -56,72 +56,62 @@ def fetch_google_profiles() -> list[dict]:
 
 
 def _run_actor(query: str) -> list[dict]:
-    """Run the Apify actor and wait for results."""
     try:
-        # Start the actor run
         run_resp = requests.post(
             f"{BASE_URL}/acts/{ACTOR_ID}/runs",
             headers={
-                "Authorization": f"Bearer {APIFY_API_KEY}",
+                "Authorization": f"Bearer {APIFY_KEY}",
                 "Content-Type":  "application/json",
             },
             json={
-                "search":             query,
-                "maxItems":           MAX_PROFILES_PER_QUERY,
-                "profileScraperMode": "Short",
+                "searchQuery":         query,
+                "maxProfilesToScrape": MAX_PER_QUERY,
+                "profileScraperMode":  "Short",
             },
             timeout=30,
         )
         run_resp.raise_for_status()
-        run_id = run_resp.json().get("data", {}).get("id")
+        data   = run_resp.json().get("data", {})
+        run_id = data.get("id")
         if not run_id:
-            logger.warning(f"No run ID returned for '{query}'")
             return []
 
-        # Wait for run to complete
-        logger.info(f"  Run started: {run_id} — waiting...")
-        for _ in range(30):  # wait up to 5 minutes
+        # Wait for completion
+        dataset_id = None
+        for _ in range(30):
             time.sleep(10)
             status_resp = requests.get(
                 f"{BASE_URL}/actor-runs/{run_id}",
-                headers={"Authorization": f"Bearer {APIFY_API_KEY}"},
+                headers={"Authorization": f"Bearer {APIFY_KEY}"},
                 timeout=15,
             )
-            status = status_resp.json().get("data", {}).get("status")
+            run_data   = status_resp.json().get("data", {})
+            status     = run_data.get("status")
             if status == "SUCCEEDED":
+                dataset_id = run_data.get("defaultDatasetId")
                 break
             elif status in ["FAILED", "ABORTED", "TIMED-OUT"]:
-                logger.warning(f"  Run failed with status: {status}")
+                logger.warning(f"  Actor run {status}")
                 return []
 
-        # Fetch results from dataset
-        dataset_id = status_resp.json().get("data", {}).get("defaultDatasetId")
         if not dataset_id:
             return []
 
-        results_resp = requests.get(
+        items_resp = requests.get(
             f"{BASE_URL}/datasets/{dataset_id}/items",
-            headers={"Authorization": f"Bearer {APIFY_API_KEY}"},
-            params={"clean": "true", "format": "json"},
-            timeout=30,
+            headers={"Authorization": f"Bearer {APIFY_KEY}"},
+            params={"format": "json"},
+            timeout=20,
         )
-        results_resp.raise_for_status()
-        items = results_resp.json()
-        if items:
-            logger.info(f"  Sample item keys: {list(items[0].keys()) if items else 'empty'}")
-            # Save first raw item for debugging
-            import json as _json
-            with open("output/debug_apify_raw.json", "w") as _f:
-                _json.dump(items[:2], _f, indent=2)
-            logger.info(f"  Raw sample saved to output/debug_apify_raw.json")
+        items_resp.raise_for_status()
+        items = items_resp.json()
+        logger.info(f"  Got {len(items)} profiles")
 
         records = []
         for item in items:
-            record = _parse_item(item)
+            record = _parse_profile(item)
             if record:
                 records.append(record)
-
-        logger.info(f"  Got {len(records)} profiles")
         return records
 
     except Exception as e:
@@ -129,90 +119,71 @@ def _run_actor(query: str) -> list[dict]:
         return []
 
 
-def _parse_item(item: dict) -> dict | None:
+def _parse_profile(item: dict) -> dict | None:
     if not isinstance(item, dict):
         return None
 
-    # Apify HarvestAPI returns nested structure — handle both flat and nested
-    # Try common field names used by this actor
-    name = (
-        item.get("name") or
-        item.get("fullName") or
-        item.get("firstName","") + " " + item.get("lastName","")
-    ).strip()
-
+    name = (item.get("name") or item.get("fullName") or "").strip()
     if not name or len(name) < 4:
         return None
 
     linkedin_url = (
         item.get("linkedinUrl") or
-        item.get("profileUrl") or
-        item.get("url") or
-        item.get("linkedin_url") or ""
+        item.get("linkedinProfileUrl") or
+        item.get("profileUrl") or ""
     ).strip()
 
     title = (
         item.get("headline") or
-        item.get("title") or
-        item.get("currentPosition") or ""
+        item.get("position") or
+        item.get("title") or ""
     )
     if isinstance(title, dict):
         title = title.get("title", "")
-    title = str(title).strip()[:100]
+    title = str(title).strip()[:150]
 
-    location = str(item.get("location") or item.get("city") or "").strip()
+    location = item.get("location") or {}
+    if isinstance(location, dict):
+        city_text = location.get("linkedinText") or location.get("city") or ""
+    else:
+        city_text = str(location)
 
-    # Current company
+    # Filter — only Saudi-based people
+    saudi_signals = [
+        "saudi", "ksa", "riyadh", "jeddah", "mecca", "medina",
+        "dammam", "dhahran", "thuwal", "abha", "tabuk", "hail",
+        "jubail", "yanbu", "khobar", "hofuf", "taif", "buraidah",
+        "kingdom of saudi", "المملكة", "الرياض", "جدة", "مكة",
+    ]
+    if not any(s in city_text.lower() for s in saudi_signals):
+        return None
+
+    # Extract org from experience
     org = ""
-    company = item.get("currentCompany") or item.get("company") or ""
-    if isinstance(company, dict):
-        org = company.get("name", "")
-    elif isinstance(company, str):
-        org = company
+    experience = item.get("experience") or item.get("positions") or []
+    if isinstance(experience, list) and experience:
+        current = experience[0]
+        if isinstance(current, dict):
+            org = (current.get("companyName") or
+                   current.get("company") or "")
+            if isinstance(org, dict):
+                org = org.get("name", "")
 
-    # Try positions array
+    # Fallback: extract from title
     if not org:
-        positions = item.get("positions") or item.get("experience") or []
-        if positions and isinstance(positions, list) and len(positions) > 0:
-            pos = positions[0]
-            if isinstance(pos, dict):
-                org = pos.get("companyName") or pos.get("company","")
+        if " at " in title:
+            org = title.split(" at ")[-1].strip()[:80]
+        elif " @ " in title:
+            org = title.split(" @ ")[-1].strip()[:80]
+
+    city = city_text.split(",")[0].strip() or "Saudi Arabia"
 
     return {
         "name":         name,
         "title":        title,
-        "organization": _norm_org(org),
-        "city":         _extract_city(location),
+        "organization": org,
+        "city":         city,
         "country":      "Saudi Arabia",
         "linkedin_url": linkedin_url,
         "source":       "apify_linkedin",
     }
-
-
-def _norm_org(raw: str) -> str:
-    if not raw:
-        return ""
-    m = {
-        "king abdullah university": "KAUST", "kaust": "KAUST",
-        "sdaia": "SDAIA", "kacst": "KACST",
-        "king abdulaziz university": "KAU",
-        "king saud university": "KSU",
-        "kfupm": "KFUPM", "king fahd": "KFUPM",
-        "aramco": "Saudi Aramco", "elm": "Elm", "mozn": "Mozn",
-        "alfaisal": "Alfaisal University",
-        "imam": "Imam University",
-    }
-    low = raw.lower()
-    for k, v in m.items():
-        if k in low:
-            return v
-    return raw
-
-
-def _extract_city(location: str) -> str:
-    cities = ["Riyadh", "Jeddah", "Thuwal", "Dhahran", "Dammam", "Abha", "Medina"]
-    low = location.lower()
-    for city in cities:
-        if city.lower() in low:
-            return city
-    return "Saudi Arabia"
