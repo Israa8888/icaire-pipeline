@@ -10,7 +10,7 @@ import requests, logging, time, os
 logger = logging.getLogger(__name__)
 
 APIFY_API_KEY = os.getenv("APIFY_API_KEY", "")
-ACTOR_ID      = "harvestapi~linkedin-profile-search"
+ACTOR_ID      = "harvestapi/linkedin-profile-search"
 BASE_URL      = "https://api.apify.com/v2"
 
 # Search queries targeting Saudi AI/ethical AI professionals
@@ -64,12 +64,15 @@ def _run_actor(query: str, location: str) -> list[dict]:
         # Start the actor run
         run_resp = requests.post(
             f"{BASE_URL}/acts/{ACTOR_ID}/runs",
-            headers={"Authorization": f"Bearer {APIFY_API_KEY}"},
+            headers={
+                "Authorization": f"Bearer {APIFY_API_KEY}",
+                "Content-Type":  "application/json",
+            },
             json={
-                "searchQuery":   query,
-                "location":      location,
-                "maxProfiles":   MAX_PROFILES_PER_QUERY,
-                "scrapeMode":    "fast",  # cheaper — gets name, title, URL, location
+                "searchQuery":          query,
+                "locationsFilter":      [location],
+                "maxProfilesToScrape":  MAX_PROFILES_PER_QUERY,
+                "scrapeMode":           "fast",
             },
             timeout=30,
         )
